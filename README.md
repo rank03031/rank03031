@@ -1,5 +1,6 @@
 사용한 모델: https://www.kaggle.com/code/abd0kamel/mutemotion-wlasl-translation-model/notebook#Introduction
 Input에 mutemotion-output을 참고해주세요.
+ㄴ 모델이 안 올라갑니다.. 링크에서 다운받아주세요.
 
 **알파벳이 아닌 단어 수준으로 학습되어 있는 모델입니다(labels, class list 참고)**
 

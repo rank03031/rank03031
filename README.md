@@ -1,6 +1,8 @@
 사용한 모델: https://www.kaggle.com/code/abd0kamel/mutemotion-wlasl-translation-model/notebook#Introduction
 Input에 mutemotion-output을 참고해주세요.
 
+**알파벳이 아닌 단어 수준으로 학습되어 있는 모델입니다(labels, class list 참고)**
+
 main.py -GUI부분, 지금 당장 실행 안 되는 거 정상입니다
 GUI
 ![image](https://github.com/user-attachments/assets/5a1c96f2-c791-46a3-8955-0e9503b12324)

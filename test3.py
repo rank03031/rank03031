@@ -3,10 +3,8 @@ import os
 import gc
 import cv2
 import json
-import time
 import shutil
 import numpy as np
-from tqdm import tqdm
 import mediapipe as mp
 import tensorflow as tf
 import matplotlib.pyplot as plt
@@ -15,10 +13,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 # 모델 로드
-model = tf.keras.models.load_model('12-14.h5') 
+model = tf.keras.models.load_model('12-14.h5')
 
 video_path = 'C:/Users/COX/Desktop/영상/00341.mp4' # 입력할 비디오, GUI 인풋으로 수정할 것
-output_path = 'andmarks_output.mp4'  # 저장할 비디오 경로
+output_path = 'landmarks_output.mp4'  # 저장할 비디오 경로
 
 #Mediapipe로 랜드마크 추출
 filtered_hand = list(range(21))
@@ -41,6 +39,7 @@ hands = mp.solutions.hands.Hands()
 pose = mp.solutions.pose.Pose()
 face_mesh = mp.solutions.face_mesh.FaceMesh(refine_landmarks=True)
 
+# 랜드마크 추출
 def get_frame_landmarks(frame):
     all_landmarks = np.zeros((HAND_NUM * 2 + POSE_NUM + FACE_NUM, 3))
     
@@ -72,43 +71,75 @@ def get_frame_landmarks(frame):
         executor.submit(get_pose, frame)
         executor.submit(get_face, frame)
 
-    return all_landmarks        # 랜드마크 좌표 반환
+    return all_landmarks        # 랜드마크 좌표 반환(2차원)
 
 
 def get_video_landmarks(video_path, start_frame=1, end_frame=-1):
     cap = cv2.VideoCapture(video_path)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
     if start_frame <= 1:
         start_frame = 1
         
-    elif start_frame > int(cap.get(cv2.CAP_PROP_FRAME_COUNT)):
+    elif start_frame > frame_count:
         start_frame = 1
-        end_frame = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        end_frame = frame_count
         
     if end_frame < 0: 
-        end_frame = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        end_frame = frame_count
 
-    num_landmarks = HAND_NUM * 2 + POSE_NUM + FACE_NUM
-    all_frame_landmarks = np.zeros((end_frame - start_frame + 1, num_landmarks, 3))
     frame_index = 1
     
+    sign_sequences = np.zeros((frame_count, frame_count, 180, 3))  # 수어 동작을 저장할 리스트
+    current_sign = np.zeros((frame_count, 180, 3)) 
+    in_sign = False  # 현재 수어 동작 중인지 여부
+    cnt = 1
+    
     while cap.isOpened() and frame_index <= end_frame:
+        
         ret, frame = cap.read()
+        h, w, _ = frame.shape
         if not ret:
             break
         if frame_index >= start_frame:
             frame.flags.writeable = False
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame_landmarks = get_frame_landmarks(frame)
-            all_frame_landmarks[frame_index - start_frame] = frame_landmarks
+            START_THRESHOLD = h * 0.95
+ 
+            if frame_landmarks[0][1]:
+                right_wrist_y = frame_landmarks[0][1] * h 
+            else:
+                right_wrist_y = h  
+            if frame_landmarks[21][1]:
+                left_wrist_y = frame_landmarks[21][1] * h
+            else:
+                left_wrist_y = h
+      
+            wrist_y = min(right_wrist_y, left_wrist_y)
+            #print(wrist_y)
+            if wrist_y < START_THRESHOLD:
+                if not in_sign:
+                    in_sign = True
+                current_sign[frame_index - start_frame, :, :] = frame_landmarks  # 현재 수어 동작의 프레임, 랜드마크
+                
+            else:
+                if in_sign:
+                    sign_sequences[cnt, :, :, :] = current_sign # (cnt, frame, 180, 3)
+                    current_sign = np.zeros((frame_count, 180, 3))
+                    cnt += 1
+                    in_sign = False
 
         frame_index += 1
-
+   
+    #print(sign_sequences)
     cap.release()
     hands.reset()
     pose.reset()
     face_mesh.reset()
-    return all_frame_landmarks  # (f, 180, 3) 형태
+    return sign_sequences, cnt
+
+
 
 def draw_landmarks(input_path, output_path, video_landmarks, start_frame=1, end_frame=-1):
     cap = cv2.VideoCapture(input_path)
@@ -147,7 +178,41 @@ def draw_landmarks(input_path, output_path, video_landmarks, start_frame=1, end_
     out.release()
 
 
-labels_dict = np.load('labels.npz', allow_pickle=True)
+
+
+
+""" # 팔 각도 계산 : 정확하지 않다.
+def angle_product(frame, shoulder, elbow, wrist) :
+    if shoulder is None or elbow is None or wrist is None:
+        return False
+    
+    h, w, _ = frame.shape
+    
+    shoulder_coords = (int(shoulder[0] * w), int(shoulder[1] * h))
+    elbow_coords = (int(elbow[0] * w), int(elbow[1] * h))
+    wrist_coords = (int(wrist[0] * w), int(wrist[1] * h)) 
+    
+    AB = np.array([elbow_coords[0] - shoulder_coords[0], elbow_coords[1] - shoulder_coords[1]])
+    BC = np.array([wrist_coords[0] - elbow_coords[0], wrist_coords[1] - elbow_coords[1]])
+    
+    # 벡터의 길이를 계산
+    norm_AB = np.linalg.norm(AB)
+    norm_BC = np.linalg.norm(BC) 
+    
+    # 벡터의 길이가 0인 경우 체크
+    if norm_AB == 0 or norm_BC == 0:
+        return False 
+    
+    dot_product = np.dot(AB, BC)
+    norm_AB = np.linalg.norm(AB)
+    norm_BC = np.linalg.norm(BC)
+    cos_theta = dot_product / (norm_AB * norm_BC)
+    angle = np.arccos(np.clip(cos_theta, -1.0, 1.0))
+    angle_degrees = np.degrees(angle)  
+    
+    print(angle_degrees)
+    
+    return angle_degrees """
 
 """ 
 landmarks_dict = np.load('landmarks_V3.npz', allow_pickle=True)
@@ -161,7 +226,7 @@ with open('WLASL_parsed_data.json', 'r') as json_file:
     [x + HAND_NUM * 2 + POSE_NUM for x in filtered_face]
 )
 
-# 12-14.h5 모델에서 사용된 비디오 전처리 함수
+# 참고: 12-14.h5 모델에서 사용된 비디오 전처리 함수
 def sequences(X, Y, length=30, step=1, pad=0):
     X_sequences = []
     Y_sequences = []
@@ -244,32 +309,65 @@ def clone_skip(landmarks_array,desired_frames):
     return np.array(reshaped_landmarks) """
 
 
-# 200 프레임보다 작은 비디오에 대해서만 처리 중입니다
-# 영상 슬라이딩 방법 필요
-def predict_landmarks(model, video_landmarks):   
-    num_frames = video_landmarks.shape[0]   # 비디오 랜드마크의 프레임 수 확인,  프레임 수가 200 미만일 경우 패딩 추가
+#각 시퀀스별로 예측 수행
+def predict_landmarks(model, sign_sequences, cnt):  
+    predictions_list = []
+    length = 200  
+    frame_count = len(sign_sequences[0])
+    for i in range(cnt-1):            #시퀀스 개수만큼 수행
+        fcount = -1
+        num = 0
+        while (np.any(sign_sequences[i][num]) != 0):
+            fcount += 1        # 각 동작의 프레임 수 확인
+            num += 1
 
-    if num_frames < 200:
-        padding = np.zeros((200 - num_frames, 180, 3))  # 0으로 패딩
-        padded_landmarks = np.vstack((video_landmarks, padding))
-    else:
-        padded_landmarks = video_landmarks[:200]  
+        if fcount < length and frame_count < length:
+            reshaped_sequence = np.zeros((1, length, 180, 3))
+            padded_seq = padding(sign_sequences[i], frame_count, length)  # 패딩 추가
+            reshaped_sequence[0 , :, :, : ] = padded_seq
+            
+            predict = model.predict(reshaped_sequence)  
+            predicted_indices = np.argmax(predict, axis=1)
+            predicted_label = [labels_array[i] for i in predicted_indices]  # 레이블 변환
+            print("Predicted labels:", predicted_label)
+            predictions_list.append(predicted_indices)  #예측 리스트 저장
+            
+        elif fcount < length and frame_count > length:
+            reshaped_sequence = np.zeros((1, length, 180, 3))
+            reshaped_sequence[0 , :, :, : ] = sign_sequences[i][:length]  
+            
+            predict = model.predict(reshaped_sequence)  
+            predicted_indices = np.argmax(predict, axis=1)
+            predicted_label = [labels_array[i] for i in predicted_indices]  # 레이블 변환
+            print("Predicted labels:", predicted_label)
+            predictions_list.append(predicted_indices)  #예측 리스트 저장
+            
+        else :
+            double_sequence()
 
-    reshaped_landmarks = padded_landmarks.reshape(1, 200, 180, 3)
-    predictions = model.predict(reshaped_landmarks)
 
+    predictions = np.array(predictions_list)  
+    print("Raw predictions shape:", predictions.shape)  
     return predictions
 
 
-video_landmarks = get_video_landmarks(video_path)   # 비디오에서 랜드마크 추출 **
-""" draw_landmarks(video_path, output_path, video_landmarks) # 랜드마크가 그려진 영상 저장 """
 
-predictions = predict_landmarks(model, video_landmarks)
-# print(predictions)
+def double_sequence():
+    return
 
-# 가장 높은 확률을 가진 클래스 인덱스 찾기
-predicted_class_index = np.argmax(predictions, axis=1)
+
+def padding(sequence, frame_count, length):  
+    pad_length = length - frame_count
+    return np.pad(sequence, ((0, pad_length), (0, 0), (0, 0)), mode='constant', constant_values=0)
+
+
+labels_dict = np.load('labels.npz', allow_pickle=True)
 labels_array = list(labels_dict.keys())  # 키를 리스트로 변환
 
-predicted_label = labels_array[predicted_class_index[0]]
-print("Predicted label:", predicted_label)
+#4차원 배열과 시퀀스 개수
+sign_sequences, cnt = get_video_landmarks(video_path)   # 비디오에서 랜드마크 추출 **
+""" draw_landmarks(video_path, output_path, video_landmarks) # 랜드마크가 그려진 영상 저장 """
+
+predictions = predict_landmarks(model, sign_sequences, cnt) 
+# print(predictions)
+

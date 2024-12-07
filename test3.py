@@ -1,22 +1,16 @@
-import math
-import os
-import gc
 import cv2
-import json
-import shutil
 import numpy as np
 import mediapipe as mp
 import tensorflow as tf
-import matplotlib.pyplot as plt
-from sklearn.preprocessing import LabelEncoder
 from concurrent.futures import ThreadPoolExecutor
 
 
 # 모델 로드
 model = tf.keras.models.load_model('12-14.h5')
 
-video_path = 'C:/Users/COX/Desktop/영상/00341.mp4' # 입력할 비디오, GUI 인풋으로 수정할 것
-output_path = 'landmarks_output.mp4'  # 저장할 비디오 경로
+video_path = '' # 입력할 비디오
+output_path = 'translated_video.mp4'  # 저장할 비디오 경로
+landmark_output_path = 'landmarks_output.mp4'
 
 #Mediapipe로 랜드마크 추출
 filtered_hand = list(range(21))
@@ -141,7 +135,7 @@ def get_video_landmarks(video_path, start_frame=1, end_frame=-1):
 
 
 
-def draw_landmarks(input_path, output_path, video_landmarks, start_frame=1, end_frame=-1):
+""" def draw_landmarks(input_path, output_path, video_landmarks, start_frame=1, end_frame=-1):
     cap = cv2.VideoCapture(input_path)
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -175,9 +169,7 @@ def draw_landmarks(input_path, output_path, video_landmarks, start_frame=1, end_
         frame_index += 1
 
     cap.release()
-    out.release()
-
-
+    out.release() """
 
 
 
@@ -214,100 +206,6 @@ def angle_product(frame, shoulder, elbow, wrist) :
     
     return angle_degrees """
 
-""" 
-landmarks_dict = np.load('landmarks_V3.npz', allow_pickle=True)
-with open('WLASL_parsed_data.json', 'r') as json_file:
-    data = json.load(json_file)
-
-    landmarks = (
-    [x for x in filtered_hand] +
-    [x + HAND_NUM for x in filtered_hand] +
-    [x + HAND_NUM * 2 for x in filtered_pose] +
-    [x + HAND_NUM * 2 + POSE_NUM for x in filtered_face]
-)
-
-# 참고: 12-14.h5 모델에서 사용된 비디오 전처리 함수
-def sequences(X, Y, length=30, step=1, pad=0):
-    X_sequences = []
-    Y_sequences = []
-
-    for inputs, label in zip(X, Y):
-        num = inputs.shape[0]
-
-        if num < length:
-            padding = length - num
-            inputs = np.pad(
-            inputs, ((0, padding), (0, 0), (0, 0)),
-            mode='constant', constant_values=pad
-            )
-            num = length
-
-        for start in range(0, num - length + 1, step):
-            end = start + length
-            sequence = inputs[start:end]
-            X_sequences.append(sequence)
-            Y_sequences.append(label)
-
-    X_sequences = np.array(X_sequences)
-    Y_sequences = np.array(Y_sequences)
-    return X_sequences, Y_sequences
-
-def padding(X, Y, length=None, pad=0):
-    if length is None:
-        length = max(len(x) for x in X)
-    
-    X_padded = []
-    for x in X:
-        if len(x) > length:
-            X_padded.append(x[:length]) #truncate
-        else:
-            pad_length = length - len(x)
-            X_padded.append(np.pad(
-                x, ((0, pad_length), (0, 0), (0, 0)),
-                mode='constant', constant_values=pad
-            ))
-            
-    X_padded = np.array(X_padded)
-#     Y = np.array(Y)
-    return X_padded, Y
-
-def skipping(landmarks, desired_frames,mode='floor'):
-    frames_num = landmarks.shape[0]
-    if mode == 'floor':
-        skip_factor = math.floor(frames_num / desired_frames)
-    elif mode == 'ceil':
-        skip_factor = math.ceil(frames_num / desired_frames)
-    skipped_landmarks = []
-
-    for i in range(0, frames_num, skip_factor):
-        skipped_landmarks.append(landmarks[i])
-        if len(skipped_landmarks)==desired_frames:
-            break
-
-    return np.array(skipped_landmarks)
-
-def cloning(landmarks, desired_frames):
-    
-    frames_num = landmarks.shape[0]
-    repeat_factor = math.ceil(desired_frames / frames_num)
-    
-    cloned_list = np.repeat(landmarks, repeat_factor, axis=0)
-    cloned_list = cloned_list[:desired_frames]
-    return cloned_list
-
-def clone_skip(landmarks_array,desired_frames):
-    reshaped_landmarks = []
-    for landmarks in landmarks_array:
-        frames_number = landmarks.shape[0]
-        
-        if frames_number == desired_frames:
-            reshaped_landmarks.append(landmarks)
-        elif frames_number < desired_frames:
-            reshaped_landmarks.append(cloning(landmarks,desired_frames))
-        elif frames_number > desired_frames:
-            reshaped_landmarks.append(skipping(landmarks,desired_frames))
-    return np.array(reshaped_landmarks) """
-
 
 #각 시퀀스별로 예측 수행
 def predict_landmarks(model, sign_sequences, cnt):  
@@ -330,7 +228,7 @@ def predict_landmarks(model, sign_sequences, cnt):
             predicted_indices = np.argmax(predict, axis=1)
             predicted_label = [labels_array[i] for i in predicted_indices]  # 레이블 변환
             print("Predicted labels:", predicted_label)
-            predictions_list.append(predicted_indices)  #예측 리스트 저장
+            predictions_list.append(predicted_label)  #예측 리스트 저장
             
         elif fcount < length and frame_count > length:
             reshaped_sequence = np.zeros((1, length, 180, 3))
@@ -338,22 +236,37 @@ def predict_landmarks(model, sign_sequences, cnt):
             
             predict = model.predict(reshaped_sequence)  
             predicted_indices = np.argmax(predict, axis=1)
-            predicted_label = [labels_array[i] for i in predicted_indices]  # 레이블 변환
+            predicted_label = [labels_array[i] for i in predicted_indices]
             print("Predicted labels:", predicted_label)
-            predictions_list.append(predicted_indices)  #예측 리스트 저장
+            predictions_list.append(predicted_label)  
             
         else :
-            double_sequence()
+            best_prediction = double_sequence(sign_sequences[i], fcount)
+            predicted_label = labels_array[best_prediction]  
+            predictions_list.append(predicted_label)
 
 
     predictions = np.array(predictions_list)  
-    print("Raw predictions shape:", predictions.shape)  
+    #print("Raw predictions shape:", predictions.shape)  
     return predictions
 
 
 
-def double_sequence():
-    return
+def double_sequence(sequence, fcount, length=200):
+    sequences = np.zeros((fcount-length+1, length, 180, 3))
+        # fcount가 length보다 클 경우에만 실행
+        # sequence의 길이    
+    for start in range(fcount-length+1):
+            # start 인덱스에서 length 길이만큼 자른 부분을 추가
+        end = start + length
+        sequences[start, :, :, :] = sequence[start:end]
+    
+    predictions = model.predict(sequences)
+
+    best_index = np.argmax(np.max(predictions, axis=1))
+    best_prediction = np.argmax(predictions[best_index])  # 해당 시퀀스에서 가장 높은 확률을 가진 클래스의 인덱스
+    
+    return best_prediction
 
 
 def padding(sequence, frame_count, length):  
@@ -361,13 +274,86 @@ def padding(sequence, frame_count, length):
     return np.pad(sequence, ((0, pad_length), (0, 0), (0, 0)), mode='constant', constant_values=0)
 
 
+def overlay_subtitle(input_path, output_path, predictions, start_frame=1, end_frame=-1, font_scale=1, color=(255, 255, 255), thickness=2):
+    cap = cv2.VideoCapture(input_path)
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    
+    if start_frame <= 1:
+        start_frame = 1
+    elif start_frame > int(cap.get(cv2.CAP_PROP_FRAME_COUNT)):
+        start_frame = 1
+        end_frame = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if end_frame < 0:
+        end_frame = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    in_sign = False  # 현재 수어 동작 중인지 여부
+    d = 0
+    subtitle_text = ""   
+            
+    frame_index = 1
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame_landmarks = get_frame_landmarks(frame)
+        START_THRESHOLD = height * 0.95
+        
+        # 오른쪽 손목 y 좌표 계산
+        if frame_landmarks[0][1]:
+            right_wrist_y = frame_landmarks[0][1] * height 
+        else:
+            right_wrist_y = height  
+        
+        # 왼쪽 손목 y 좌표 계산
+        if frame_landmarks[21][1]:
+            left_wrist_y = frame_landmarks[21][1] * height
+        else:
+            left_wrist_y = height
+
+        # 두 손목 중 더 낮은 y 좌표 선택
+        wrist_y = min(right_wrist_y, left_wrist_y)
+        
+        # 수어동작중이면 텍스트 표시
+        if wrist_y < START_THRESHOLD:
+            if not in_sign: 
+                in_sign = True
+                subtitle_text = predictions[d][0] if d < len(predictions) and len(predictions[d]) > 0 else ""
+                text_size = cv2.getTextSize(subtitle_text, font, font_scale, thickness)[0]  # 폰트 설정
+                text_x = (width - text_size[0]) // 2 
+                text_y = height - 10
+                d += 1
+            cv2.putText(frame, subtitle_text, (text_x, text_y), font, font_scale, color, thickness, cv2.LINE_AA)
+            out.write(frame)
+                
+        else:
+            in_sign = False
+            subtitle_text = ""
+            out.write(frame)
+
+
+        frame_index += 1
+
+    cap.release()
+    out.release()
+    cv2.destroyAllWindows()
+    
+
+
 labels_dict = np.load('labels.npz', allow_pickle=True)
 labels_array = list(labels_dict.keys())  # 키를 리스트로 변환
 
-#4차원 배열과 시퀀스 개수
-sign_sequences, cnt = get_video_landmarks(video_path)   # 비디오에서 랜드마크 추출 **
-""" draw_landmarks(video_path, output_path, video_landmarks) # 랜드마크가 그려진 영상 저장 """
 
-predictions = predict_landmarks(model, sign_sequences, cnt) 
-# print(predictions)
 
+def video_translate(video_path):
+    #4차원 배열과 시퀀스 개수
+    sign_sequences, cnt = get_video_landmarks(video_path)   # 비디오에서 랜드마크 추출 ** 시작점
+    """ draw_landmarks(video_path, landmark_output_path, video_landmarks) # 랜드마크가 그려진 영상 저장 """
+
+    predictions = predict_landmarks(model, sign_sequences, cnt)
+    overlay_subtitle(video_path, output_path, predictions)
+    # print(predictions)

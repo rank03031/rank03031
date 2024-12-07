@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
-from video_processor import process_video  # 비디오 처리 모듈 임포트
+from video_processor import video_translate  # 비디오 처리 모듈 임포트
 
 
 video_file_path = ""
@@ -15,7 +15,7 @@ def select_file():
 
 def convert_video():
     if video_file_path:
-        process_video(video_file_path)  # 변환
+        video_translate(video_file_path)  # 변환
     else:
         messagebox.showwarning("경고", "비디오 파일을 선택하세요.")
 
